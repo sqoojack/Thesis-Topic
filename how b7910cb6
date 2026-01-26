@@ -1,0 +1,23 @@
+[33mcommit b7910cb6d624af428661e02758418464198b6102[m[33m ([m[1;36mHEAD -> [m[1;32mmain[m[33m)[m
+Author: sqoojack <jack90213@gmail.com>
+Date:   Sun Jan 4 20:47:51 2026 +0800
+
+    Success attack on ST0, ST2
+
+[33mcommit 2f5a2d221d00128cc82dd2ac40bdf2765b8496b6[m
+Author: sqoojack <jack90213@gmail.com>
+Date:   Sun Jan 4 16:40:34 2026 +0800
+
+    MBPP success
+
+[33mcommit a91b2875d1979aa4b27e83c988913017e2ad79c7[m
+Author: sqoojack <jack90213@gmail.com>
+Date:   Sun Jan 4 10:26:41 2026 +0800
+
+    Add shadowcode success with os.system
+
+[33mcommit 6cd7748e7c788a4d930e593315dc41f5e1246262[m[33m ([m[1;31morigin/main[m[33m)[m
+Author: sqoojack <jack90213@gmail.com>
+Date:   Wed Dec 24 16:19:04 2025 +0800
+
+    Initial commit

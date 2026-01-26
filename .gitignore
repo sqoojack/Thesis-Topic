@@ -1,0 +1,40 @@
+# --- 專案特定排除 ---
+modernbert_detector/
+dataset/
+*.log
+*.pt
+*.pth
+*.h5
+
+# --- Python 暫存檔 ---
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+
+# --- 虛擬環境 ---
+venv/
+.venv/
+env/
+
+# --- IDE 設定 ---
+.vscode/
+.idea/
+
+# --- 系統檔案 ---
+.DS_Store
+Thumbs.db
+
+benign_repos/
+Baseline/
+**/datasets/
+**/result/
+**/results/
+
+Baseline/
+main_code/attack/XOXO_Attack/
+**/data/
+**/weights/
+*.pth
+*.pkl
+*.npy
