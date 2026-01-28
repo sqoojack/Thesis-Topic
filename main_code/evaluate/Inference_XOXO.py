@@ -1,20 +1,30 @@
 """
 python main_code/evaluate/Inference_XOXO.py \
-    --attack_path result/sanitized_data/CodeGuard_sanitized_XOXO.jsonl \
     --model_name_or_path microsoft/codebert-base \
     --model_weight_path main_code/attack/XOXO_Attack/learning_programs/datasets/CodeXGLUE/Code-Code/Defect-detection/code/saved_models/2019024262/microsoft/codebert-base/checkpoint-best-acc/model.bin \
+    --attack_path result/sanitized_data/CodeGuard_sanitized_XOXO_0.015_0.10.jsonl \
+    -L3_b 0.015  \
+    -L3_t 0.10  \
     --seed 68
     
 python main_code/evaluate/Inference_XOXO.py \
     --model_name_or_path microsoft/graphcodebert-base \
     --model_weight_path main_code/attack/XOXO_Attack/learning_programs/datasets/CodeXGLUE/Code-Code/Defect-detection/code/saved_models/2019024262/microsoft/graphcodebert-base/checkpoint-best-acc/model.bin \
-    --attack_path result/sanitized_data/My_defense_XOXO_clean.jsonl
+    --attack_path result/sanitized_data/CodeGuard_sanitized_XOXO_0.015_0.10.jsonl \
+    -L3_b 0.015  \
+    -L3_t 0.10  \
     --seed 68
     
 python main_code/evaluate/Inference_XOXO.py \
-    --attack_path result/My_defense_shadowcode_clean.jsonl \
     --model_name_or_path microsoft/codebert-base \
     --model_weight_path main_code/attack/XOXO_Attack/learning_programs/datasets/CodeXGLUE/Code-Code/Defect-detection/code/saved_models/2019024262/microsoft/codebert-base/checkpoint-best-acc/model.bin \
+    --attack_path result/sanitized_data/KillBadCode_XOXO_clean.jsonl \
+    --seed 68
+    
+python main_code/evaluate/Inference_XOXO.py \
+    --model_name_or_path microsoft/graphcodebert-base \
+    --model_weight_path main_code/attack/XOXO_Attack/learning_programs/datasets/CodeXGLUE/Code-Code/Defect-detection/code/saved_models/2019024262/microsoft/graphcodebert-base/checkpoint-best-acc/model.bin \
+    --attack_path result/sanitized_data/KillBadCode_XOXO_clean.jsonl \
     --seed 68
 """
 
@@ -78,6 +88,8 @@ def parse_args():
     parser.add_argument("--model_name_or_path", type=str, default="microsoft/codebert-base")
     parser.add_argument("--model_weight_path", type=str, required=True)
     parser.add_argument("--attack_path", type=str, required=True, help="Path to repaired_results.jsonl")
+    parser.add_argument("-L3_b", "--l3_base_influence", type=float, default=0.025, help="Base strict threshold for variables.")
+    parser.add_argument("-L3_t", "--l3_surprise_tolerance", type=float, default=0.10)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--block_size", type=int, default=400)
     parser.add_argument("--seed", type=int, default=42)
@@ -202,7 +214,12 @@ def main():
         os.makedirs(output_dir)
 
     results_data = {
-        "total_samples": total_samples,
+        "config": {
+            "model_type": args.model_name_or_path,
+            "attack_source": args.attack_path,
+            "l3_base_influence": args.l3_base_influence,
+            "l3_surprise_tolerance": args.l3_surprise_tolerance
+        },
         "metrics": {
             "ASR": {
                 "before_defense": round(asr_orig, 4),
@@ -214,18 +231,31 @@ def main():
                 "after_defense": round(acc_repair, 4),
                 "improvement": round(acc_repair - acc_orig, 4)
             },
-        },
-        "config": {
-            "model_weight": args.model_weight_path,
-            "attack_source": args.attack_path
         }
+
     }
 
-    output_path = os.path.join(output_dir, "ASR_XOXO.json")
-    with open(output_path, 'w', encoding='utf-8') as jf:
-        json.dump(results_data, jf, indent=4, ensure_ascii=False)
+    output_path = os.path.join(output_dir, "ASR_XOXO_baseline.json")
     
-    print(f"\n[+] Results saved to: {output_path}")
+    # 讀取現有資料
+    existing_data = []
+    if os.path.exists(output_path):
+        try:
+            with open(output_path, 'r', encoding='utf-8') as jf:
+                existing_data = json.load(jf)
+                if not isinstance(existing_data, list):
+                    existing_data = [existing_data]
+        except (json.JSONDecodeError, Exception):
+            existing_data = []
+    import datetime
+    results_data["timestamp"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    existing_data.append(results_data)
+
+    # 寫回檔案
+    with open(output_path, 'w', encoding='utf-8') as jf:
+        json.dump(existing_data, jf, indent=4, ensure_ascii=False)
+    
+    print(f"\n[+] Results appended to: {output_path}")
 
 if __name__ == "__main__":
     main()

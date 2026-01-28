@@ -11,13 +11,12 @@ CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
 """ 
 """
 ShadowCode:
-CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
-    -G 8.0 \
-    -H 10.0 \
+CUDA_VISIBLE_DEVICES=1 python main_code/defense_v2/main.py \
+    -A 11.9 \
     -L3_b 0.020 \
     -L3_t 0.05 \
     -i Dataset/ShadowCode/shadowcode_dataset.jsonl \
-    -o result/sanitized_data/shadowcode/CodeGuard_8_10.jsonl
+    -o result/sanitized_data/shadowcode/CodeGuard_11.9.jsonl
 """ 
 
 import os
@@ -29,7 +28,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from tree_sitter import Language, Parser
 from datetime import datetime
 
-# Import new modules
+# Import modules
 from Semantic_Guardrail import SemanticGuardrail
 from Adversarial_Guardrail import AdversarialGuardrail
 
@@ -52,10 +51,13 @@ def main():
     parser.add_argument("-o", "--output_path", type=str, default="result/clean/My_defense_XOXO_clean.jsonl")
     parser.add_argument("--model_id", type=str, default="Salesforce/codegen-350M-mono")
     
-    # Adversarial Guardrail Params (L1/L2)
-    parser.add_argument("-G", "--th_comment_grey", type=float, default=10.0)
-    parser.add_argument("-H", "--th_comment_hard", type=float, default=20.0)
-    parser.add_argument("--th_string_hard", type=float, default=100.0)
+    # Adversarial Guardrail Params (Simplified)
+    # 單一閾值，用於判定是否刪除註解
+    parser.add_argument("-A", "--adversarial_threshold", type=float, default=10.0, 
+                        help="Threshold for deleting adversarial comments.")
+    # 字串的閾值通常較高，建議保留獨立設定，或者您也可以將其設為與 A 相同
+    parser.add_argument("--th_string_hard", type=float, default=100.0,
+                        help="Threshold specifically for string literals.")
     
     # Semantic Guardrail Params (L3)
     parser.add_argument("-L3_b", "--l3_base_influence", type=float, default=0.025, help="Base strict threshold for variables.")
@@ -89,21 +91,22 @@ def main():
     # --- Instantiate Guardrails ---
     # Semantic (L3)
     semantic_guard = SemanticGuardrail(model, tokenizer, device, TS_PARSER, C_LANGUAGE, args)
-    # Adversarial (L1/L2)
+    # Adversarial (L1/L2 Merged)
     adversarial_guard = AdversarialGuardrail(model, tokenizer, device, TS_PARSER, C_LANGUAGE, args)
     
     stats = {
         "TP": 0, "TN": 0, "FP": 0, "FN": 0, 
         "Total_Adv": 0, "Total_Benign": 0,
-        "FP_Semantic": 0, "FP_Adversarial_Hard": 0, "FP_Adversarial_Grey": 0,
-        "TP_Semantic": 0, "TP_Adversarial_Hard": 0, "TP_Adversarial_Grey": 0
+        "FP_Semantic": 0, "FP_Adversarial": 0,
+        "TP_Semantic": 0, "TP_Adversarial": 0
     }
     
     fp_samples = []
     fn_samples = [] 
 
-    print(f"[-] Strategy: Semantic First -> Adversarial Second")
+    print(f"[-] Strategy: Semantic First -> Adversarial Second (Direct Deletion)")
     print(f"    Semantic Params -> Base Influence: {args.l3_base_influence}, Tolerance: {args.l3_surprise_tolerance}")
+    print(f"    Adversarial Params -> Threshold: {args.adversarial_threshold}")
     
     with open(args.input_path, 'r', encoding='utf-8') as f:
         lines = [line.strip() for line in f if line.strip()]
@@ -117,15 +120,19 @@ def main():
 
             def run_defense_pipeline(code_snippet):
                 code_to_check = code_snippet if code_snippet else ""
-                adv_l1, adv_l2, clean_structure_code = adversarial_guard.detect(code_to_check)
+                
+                # 1. Adversarial Guardrail (Direct Deletion)
+                # detect 回傳: (是否觸發, 修復後的代碼)
+                adv_detected, clean_structure_code = adversarial_guard.detect(code_to_check)
+                
+                # 2. Semantic Guardrail (Variable Renaming)
                 sem_detected, final_code, sem_debug = semantic_guard.detect(clean_structure_code)
                 
                 return {
-                    "Semantic": sem_detected,         # semantic 結果
-                    "Adversarial_Hard": adv_l1,       # L1 結果
-                    "Adversarial_Grey": adv_l2,       # L2 結果
+                    "Semantic": sem_detected,
+                    "Adversarial": adv_detected,
                     "debug": sem_debug,
-                    "final_code": final_code          # 這是經過兩層清洗後的最終代碼
+                    "final_code": final_code
                 }
 
             # --- Benign Test ---
@@ -133,13 +140,12 @@ def main():
             benign_code = entry.get("code") or ""
             res = run_defense_pipeline(benign_code)
             
-            is_detected = res["Semantic"] or res["Adversarial_Hard"] or res["Adversarial_Grey"]
+            is_detected = res["Semantic"] or res["Adversarial"]
             
             if is_detected: 
                 stats["FP"] += 1
                 if res["Semantic"]: stats["FP_Semantic"] += 1
-                if res["Adversarial_Hard"]: stats["FP_Adversarial_Hard"] += 1
-                if res["Adversarial_Grey"]: stats["FP_Adversarial_Grey"] += 1
+                if res["Adversarial"]: stats["FP_Adversarial"] += 1
                 
                 triggered_debug = [d for d in res["debug"] if d['triggered']]
                 if len(fp_samples) < 5 and triggered_debug:
@@ -156,13 +162,12 @@ def main():
             adv_code = entry.get("adv_code") or ""
             adv_res = run_defense_pipeline(adv_code)
             
-            is_detected_adv = adv_res["Semantic"] or adv_res["Adversarial_Hard"] or adv_res["Adversarial_Grey"]
+            is_detected_adv = adv_res["Semantic"] or adv_res["Adversarial"]
             
             if is_detected_adv: 
                 stats["TP"] += 1
                 if adv_res["Semantic"]: stats["TP_Semantic"] += 1
-                if adv_res["Adversarial_Hard"]: stats["TP_Adversarial_Hard"] += 1
-                if adv_res["Adversarial_Grey"]: stats["TP_Adversarial_Grey"] += 1
+                if adv_res["Adversarial"]: stats["TP_Adversarial"] += 1
             else: 
                 stats["FN"] += 1
                 if len(fn_samples) < 5:
@@ -176,8 +181,7 @@ def main():
             entry["defense_detected"] = is_detected_adv
             entry["layer_triggers"] = {
                 "Semantic": adv_res["Semantic"],
-                "Adversarial_Hard": adv_res["Adversarial_Hard"],
-                "Adversarial_Grey": adv_res["Adversarial_Grey"]
+                "Adversarial": adv_res["Adversarial"]
             }
             out_f.write(json.dumps(entry) + "\n")
 
@@ -199,14 +203,12 @@ def main():
     print(f"FPR:          {fpr * 100:.2f}%")
 
     print(f"False Positives Breakdown:")
-    print(f"  Adversarial Guardrail (Hard): {stats['FP_Adversarial_Hard']}")
-    print(f"  Adversarial Guardrail (Grey): {stats['FP_Adversarial_Grey']}")
-    print(f"  Semantic Guardrail:           {stats['FP_Semantic']}")
+    print(f"  Adversarial Guardrail: {stats['FP_Adversarial']}")
+    print(f"  Semantic Guardrail:    {stats['FP_Semantic']}")
     print("-" * 30)
     print(f"True Positives Breakdown:")
-    print(f"  Adversarial Guardrail (Hard): {stats['TP_Adversarial_Hard']}")
-    print(f"  Adversarial Guardrail (Grey): {stats['TP_Adversarial_Grey']}")
-    print(f"  Semantic Guardrail:           {stats['TP_Semantic']}")
+    print(f"  Adversarial Guardrail: {stats['TP_Adversarial']}")
+    print(f"  Semantic Guardrail:    {stats['TP_Semantic']}")
     
     eval_dir = "result/evaluation"
     eval_file = os.path.join(eval_dir, f"f1_score_{attack_type}.json")
@@ -217,8 +219,7 @@ def main():
         "model_id": args.model_id,
         "attack_type": attack_type,
         "parameters": {
-            "th_comment_grey": args.th_comment_grey,
-            "th_comment_hard": args.th_comment_hard,
+            "adversarial_threshold": args.adversarial_threshold,
             "th_string_hard": args.th_string_hard,
             "l3_base_influence": args.l3_base_influence,
             "l3_surprise_tolerance": args.l3_surprise_tolerance
