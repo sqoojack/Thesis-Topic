@@ -6,6 +6,12 @@ python main_code/evaluate/Inference_XOXO.py \
     --seed 68
     
 python main_code/evaluate/Inference_XOXO.py \
+    --model_name_or_path microsoft/graphcodebert-base \
+    --model_weight_path main_code/attack/XOXO_Attack/learning_programs/datasets/CodeXGLUE/Code-Code/Defect-detection/code/saved_models/2019024262/microsoft/graphcodebert-base/checkpoint-best-acc/model.bin \
+    --attack_path result/sanitized_data/My_defense_XOXO_clean.jsonl
+    --seed 68
+    
+python main_code/evaluate/Inference_XOXO.py \
     --attack_path result/My_defense_shadowcode_clean.jsonl \
     --model_name_or_path microsoft/codebert-base \
     --model_weight_path main_code/attack/XOXO_Attack/learning_programs/datasets/CodeXGLUE/Code-Code/Defect-detection/code/saved_models/2019024262/microsoft/codebert-base/checkpoint-best-acc/model.bin \
@@ -181,9 +187,6 @@ def main():
     
     acc_orig = accuracy_score(y_true, y_pred_adv) * 100
     acc_repair = accuracy_score(y_true, y_pred_repaired) * 100
-    
-    f1_orig = f1_score(y_true, y_pred_adv, zero_division=0)
-    f1_repair = f1_score(y_true, y_pred_repaired, zero_division=0)
 
     print("\n" + "="*60)
     print(f"Evaluation Report (Total Samples: {total_samples})")
@@ -192,8 +195,37 @@ def main():
     print("-" * 60)
     print(f"{'ASR (Lower better)':<20} | {asr_orig:<14.2f}% | {asr_repair:<14.2f}% | {asr_orig - asr_repair:+.2f}%")
     print(f"{'ACC (Utility)':<20} | {acc_orig:<14.2f}% | {acc_repair:<14.2f}% | {acc_repair - acc_orig:+.2f}%")
-    # print(f"{'F1 Score':<20} | {f1_orig:<14.4f}  | {f1_repair:<14.4f}  | {f1_repair - f1_orig:+.4f}")
     print("="*60)
+    
+    output_dir = "result/evaluation"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    results_data = {
+        "total_samples": total_samples,
+        "metrics": {
+            "ASR": {
+                "before_defense": round(asr_orig, 4),
+                "after_defense": round(asr_repair, 4),
+                "improvement": round(asr_orig - asr_repair, 4)
+            },
+            "ACC": {
+                "before_defense": round(acc_orig, 4),
+                "after_defense": round(acc_repair, 4),
+                "improvement": round(acc_repair - acc_orig, 4)
+            },
+        },
+        "config": {
+            "model_weight": args.model_weight_path,
+            "attack_source": args.attack_path
+        }
+    }
+
+    output_path = os.path.join(output_dir, "ASR_XOXO.json")
+    with open(output_path, 'w', encoding='utf-8') as jf:
+        json.dump(results_data, jf, indent=4, ensure_ascii=False)
+    
+    print(f"\n[+] Results saved to: {output_path}")
 
 if __name__ == "__main__":
     main()

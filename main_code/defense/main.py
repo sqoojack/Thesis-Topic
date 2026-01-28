@@ -4,8 +4,13 @@ python main_code/defense/main.py \
     -o result/sanitized_data/CodeGuard_sanitized_shadowcode.jsonl
     
 python main_code/defense/main.py \
+    -G 100.0 \
+    -H 100.0 \
+    -L3_b 0.010 \
+    -L3_t 0.10 \
     -i Dataset/XOXO_attack/XOXO_defect_detection_codebert.jsonl \
-    -o result/sanitized_data/CodeGuard_sanitized_XOXO.jsonl
+    -o result/sanitized_data/CodeGuard_sanitized_XOXO_0.010_0.10.jsonl
+    
 """ 
 """
 python main_code/defense/main.py \
@@ -46,8 +51,8 @@ def main():
     parser.add_argument("--model_id", type=str, default="Salesforce/codegen-350M-mono")
     
     # Adversarial Guardrail Params (L1/L2)
-    parser.add_argument("--th_comment_grey", type=float, default=100.0)
-    parser.add_argument("--th_comment_hard", type=float, default=150.0)
+    parser.add_argument("-G", "--th_comment_grey", type=float, default=10.0)
+    parser.add_argument("-H", "--th_comment_hard", type=float, default=20.0)
     parser.add_argument("--th_string_hard", type=float, default=100.0)
     
     # Semantic Guardrail Params (L3)
@@ -64,6 +69,12 @@ def main():
     except Exception as e:
         print(f"[!] Tree-sitter setup failed: {e}")
         return
+    
+    attack_type = "Unknown"
+    if "ShadowCode" in args.input_path:
+        attack_type = "ShadowCode"
+    elif "XOXO_attack" in args.input_path:
+        attack_type = "XOXO_attack"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"[-] Loading Guard Model: {args.model_id}...")
@@ -195,13 +206,14 @@ def main():
     print(f"  Adversarial Guardrail (Grey): {stats['TP_Adversarial_Grey']}")
     print(f"  Semantic Guardrail:           {stats['TP_Semantic']}")
     
-    eval_dir = "result/evaluations"
-    eval_file = os.path.join(eval_dir, "f1_score_shadowcode.json")
+    eval_dir = "result/evaluation"
+    eval_file = os.path.join(eval_dir, f"f1_score_{attack_type}.json")
     os.makedirs(eval_dir, exist_ok=True)
 
     current_run_data = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "model_id": args.model_id,
+        "attack_type": attack_type,
         "parameters": {
             "th_comment_grey": args.th_comment_grey,
             "th_comment_hard": args.th_comment_hard,
@@ -214,20 +226,6 @@ def main():
             "recall": round(recall, 4),
             "f1_score": round(f1_score, 4),
             "fpr": round(fpr, 4)
-        },
-        "breakdown": {
-            "false_positives": {
-                "total": stats["FP"],
-                "L1_hard": stats['FP_Adversarial_Hard'],
-                "L2_grey": stats['FP_Adversarial_Grey'],
-                "L3_semantic": stats['FP_Semantic']
-            },
-            "true_positives": {
-                "total": stats["TP"],
-                "L1_hard": stats['TP_Adversarial_Hard'],
-                "L2_grey": stats['TP_Adversarial_Grey'],
-                "L3_semantic": stats['TP_Semantic']
-            }
         }
     }
 
