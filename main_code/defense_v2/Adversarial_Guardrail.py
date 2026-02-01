@@ -9,12 +9,17 @@ class AdversarialGuardrail:
         self.parser = parser
         self.language = language
         
-        # 接收 main.py 傳來的參數
-        # 移除 Grey/Hard 區分，統一使用 adversarial_threshold
         self.adversarial_threshold = args.adversarial_threshold
         self.th_string_hard = args.th_string_hard
 
+        # --- 新增白名單特徵 ---
+        self.docstring_keywords = [
+            '>>>', 'Example:', 'Returns:', 'Check if', 'Input to this', 
+            'Given a', 'For a', 'Calculate', 'is a palindrome'
+        ]
+
     def get_token_losses(self, input_ids):
+        # ... (保持原樣)
         with torch.no_grad():
             outputs = self.model(input_ids, labels=input_ids)
             shift_logits = outputs.logits[..., :-1, :].contiguous()
@@ -34,57 +39,63 @@ class AdversarialGuardrail:
         top_k_losses = sorted_losses[:num_tokens]
         return np.mean(top_k_losses)
 
+    def is_whitelisted(self, text):
+        """判斷是否為白名單內的 Docstring"""
+        keywords = ['>>>', 'Example:', 'Returns:', 'Check if', 'Input to this', 'Given a', 'Calculate']
+        return any(kw in text for kw in keywords) or text.count('>>>') >= 1
+
     def detect(self, code):
-        """
-        執行 Adversarial 檢測與修復 (直接刪除惡意部分)
-        Returns: triggered (bool), repaired_code (str)
-        """
-        if not code or not self.language: return False, code
+        """執行 Adversarial 檢測，並回傳詳細偵測資訊"""
+        if not code or not self.language: return False, code, []
         
         code_bytes = bytes(code, "utf8")
         try:
             tree = self.parser.parse(code_bytes)
         except:
-            return False, code
+            return False, code, []
 
-        query = self.language.query("""
-            (comment) @comment
-            (string_literal) @string
-        """)
+        query = self.language.query("(comment) @comment (string_literal) @string")
         captures = query.captures(tree.root_node)
         
         replacements = [] 
         triggered = False
+        adv_debug = [] # 新增：存放偵測細節
         
         for node, type_name in captures:
             text = node.text.decode("utf8", errors='ignore')
-            start = node.start_byte
-            end = node.end_byte
-            
             if len(text) < 6: continue 
 
             score = self.calc_mink_score(text, k=0.2)
+            current_threshold = self.adversarial_threshold
+            whitelisted = self.is_whitelisted(text)
             
-            if type_name == 'comment':
-                # 只要超過閾值，直接刪除 (替換為空字串)
-                if score > self.adversarial_threshold:
-                    replacements.append((start, end, "")) 
-                    triggered = True
-                
-            elif type_name == 'string':
-                # 字串通常 entropy 較高，建議保留獨立的閾值，或者也可以統一
-                if score > self.th_string_hard:
-                    replacements.append((start, end, '""')) 
-                    triggered = True
+            if type_name == 'comment' and whitelisted:
+                current_threshold *= 2.5 # 白名單加權
+            
+            # 判定是否觸發
+            is_this_triggered = False
+            if type_name == 'comment' and score > current_threshold:
+                is_this_triggered = True
+                replacements.append((node.start_byte, node.end_byte, "")) 
+            elif type_name == 'string' and score > self.th_string_hard:
+                is_this_triggered = True
+                replacements.append((node.start_byte, node.end_byte, '""')) 
+
+            if is_this_triggered:
+                triggered = True
+                adv_debug.append({
+                    "type": type_name,
+                    "score": score,
+                    "whitelisted": whitelisted,
+                    "text_snippet": text[:50].replace('\n', ' ')
+                })
         
         if not replacements:
-            return False, code
+            return False, code, []
 
-        # 執行替換
         replacements.sort(key=lambda x: x[0], reverse=True)
         new_code_bytes = list(code_bytes)
         for start, end, rep_text in replacements:
-            rep_bytes = bytes(rep_text, "utf8")
-            new_code_bytes[start:end] = rep_bytes
+            new_code_bytes[start:end] = bytes(rep_text, "utf8")
             
-        return triggered, bytes(new_code_bytes).decode("utf8", errors='ignore')
+        return triggered, bytes(new_code_bytes).decode("utf8", errors='ignore'), adv_debug

@@ -12,11 +12,11 @@ CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
 """
 ShadowCode:
 CUDA_VISIBLE_DEVICES=1 python main_code/defense_v2/main.py \
-    -A 11.9 \
-    -L3_b 0.020 \
-    -L3_t 0.05 \
+    -A 9 \
+    -L3_b 100.020 \
+    -L3_t 100.05 \
     -i Dataset/ShadowCode/shadowcode_dataset.jsonl \
-    -o result/sanitized_data/shadowcode/CodeGuard_11.9.jsonl
+    -o result/sanitized_data/shadowcode/CodeGuard_9.jsonl
 """ 
 
 import os
@@ -104,7 +104,6 @@ def main():
     fp_samples = []
     fn_samples = [] 
 
-    print(f"[-] Strategy: Semantic First -> Adversarial Second (Direct Deletion)")
     print(f"    Semantic Params -> Base Influence: {args.l3_base_influence}, Tolerance: {args.l3_surprise_tolerance}")
     print(f"    Adversarial Params -> Threshold: {args.adversarial_threshold}")
     
@@ -121,17 +120,18 @@ def main():
             def run_defense_pipeline(code_snippet):
                 code_to_check = code_snippet if code_snippet else ""
                 
-                # 1. Adversarial Guardrail (Direct Deletion)
-                # detect 回傳: (是否觸發, 修復後的代碼)
-                adv_detected, clean_structure_code = adversarial_guard.detect(code_to_check)
+                # 1. Adversarial Guardrail
+                # 現在 detect 會回傳 (triggered, code, details)
+                adv_detected, clean_structure_code, adv_debug = adversarial_guard.detect(code_to_check)
                 
-                # 2. Semantic Guardrail (Variable Renaming)
+                # 2. Semantic Guardrail
                 sem_detected, final_code, sem_debug = semantic_guard.detect(clean_structure_code)
                 
                 return {
                     "Semantic": sem_detected,
                     "Adversarial": adv_detected,
-                    "debug": sem_debug,
+                    "adv_debug": adv_debug, # 新增
+                    "sem_debug": sem_debug,
                     "final_code": final_code
                 }
 
@@ -145,14 +145,19 @@ def main():
             if is_detected: 
                 stats["FP"] += 1
                 if res["Semantic"]: stats["FP_Semantic"] += 1
-                if res["Adversarial"]: stats["FP_Adversarial"] += 1
+                if res["Adversarial"]: 
+                    stats["FP_Adversarial"] += 1
+                    for detail in res["adv_debug"]:
+                        print(f"  [FP-Adv] 類型: {detail['type']}, 分數: {detail['score']:.2f}, 白名單: {detail['whitelisted']}")
+                        print(f"    刪除內容: {detail['text_snippet']}")
                 
-                triggered_debug = [d for d in res["debug"] if d['triggered']]
-                if len(fp_samples) < 5 and triggered_debug:
+                triggered_sem = [d for d in res["sem_debug"] if d['triggered']]
+                if len(fp_samples) < 5 and triggered_sem:
                     fp_samples.append({
                         "id": stats["Total_Benign"],
                         "code": benign_code[:100],
-                        "debug": triggered_debug
+                        "sem_debug": triggered_sem, # 鍵值也建議同步更新
+                        "adv_debug": res["adv_debug"]
                     })
             else: 
                 stats["TN"] += 1
@@ -174,7 +179,8 @@ def main():
                     fn_samples.append({
                         "id": stats["Total_Adv"],
                         "code": adv_code[:100],
-                        "debug": adv_res["debug"]
+                        "sem_debug": adv_res["sem_debug"],
+                        "adv_debug": adv_res["adv_debug"]
                     })
             
             entry["repaired_code"] = adv_res["final_code"]

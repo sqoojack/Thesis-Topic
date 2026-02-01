@@ -1,13 +1,12 @@
 """
 python main_code/evaluate/Inference_shadowcode.py \
-    --clean_data result/sanitized_data/shadowcode/CodeGuard_10.jsonl \
-    -A 10 \
+    --clean_data result/sanitized_data/shadowcode/CodeGuard_9.jsonl \
+    -A 9 \
     -m 9
     
 python main_code/evaluate/Inference_shadowcode.py \
     --clean_data result/sanitized_data/shadowcode/KillBadCode.jsonl \
-    -G 10 \
-    -H 15 \
+    -A 9 \
     -m 9
 
 """
